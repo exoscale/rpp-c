@@ -56,3 +56,11 @@ The following options are supported:
 - `host`: Add a host to the list of probed hosts.
 
 
+### Running
+
+```
+rpp <configuration file>
+```
+
+If the `RPP_DEBUG` environment variable is set, produce some additional output
+on stdout.
