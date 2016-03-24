@@ -58,6 +58,8 @@ The following options are supported:
 
 ### Running
 
+Since ping requires raw sockets, rpp should be run as root.
+
 ```
 rpp <configuration file>
 ```
