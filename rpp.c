@@ -1,3 +1,21 @@
+/*
+ *
+ * riemann persistent ping, see https://github.com/exoscale/rpp-c
+ *
+ * Copyright (c) 2016 Exoscale
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -59,15 +77,33 @@ struct rpp {
     riemann_client_t            *rclient;
 };
 
-void usage(void);
-void parse_configuration_line(struct rpp *, const char *, char *);
-void parse_configuration(struct rpp *, const char *);
+void             usage(void);
+void             parse_configuration_line(struct rpp *, const char *, char *);
+void             parse_configuration(struct rpp *, const char *);
+void             dump_configuration(struct rpp *);
+void             rpp_add_hosts(struct rpp *);
+void             rpp_remove_hosts(struct rpp *);
+void             rpp_set_host_seen(struct host_list *, const char *);
+riemann_event_t *rpp_riemann_event(struct rpp *, const char *);
+void             rpp_send_messages(struct rpp *);
+void             rpp_riemann_client(struct rpp *);
 
+/*
+ * Die, explaining our usage.
+ */
 void
 usage(void) {
-    errx(1, "usage: rpp configuration");
+    fprintf(stderr, "usage: rpp <config file path>\n");
+    fprintf(stderr, "  [NOTE]: you may set the RPP_DEBUG environment variable\n");
+    errx(1, "usage: rpp <config file path>");
 }
 
+/*
+ * Parse a configuration line.
+ * This parser is awfully minimal and will only allow for one whitespace char
+ * between a configuration directive and its value. Additionaly, no trimming is
+ * done on either keys or values.
+ */
 void
 parse_configuration_line(struct rpp *env, const char *key, char *val)
 {
@@ -174,6 +210,10 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
     }
 }
 
+/*
+ * Parse a configuration file and feed valid lines to parse_configuration_line.
+ * Empty lines and lines starting with # are ignored.
+ */
 void
 parse_configuration(struct rpp *env, const char *path)
 {
@@ -226,40 +266,12 @@ parse_configuration(struct rpp *env, const char *path)
     fclose(f);
 }
 
-void
-dump_configuration(struct rpp *env)
-{
-    int i;
-    struct host *h;
-
-    if (!debug)
-        return;
-
-    printf("dumping configuration\n");
-    printf("riemann proto: %d\n", env->riemann_proto);
-    printf("riemann host: %s\n", env->riemann_host);
-    printf("riemann port: %d\n", env->riemann_port);
-    printf("riemann service: %s\n", env->riemann_service);
-    printf("riemann ca cert: %s\n", env->riemann_ca_cert);
-    printf("riemann cert: %s\n", env->riemann_cert);
-    printf("riemann cert key: %s\n", env->riemann_cert_key);
-    printf("ping timeout: %f\n", env->ping_timeout);
-    printf("ping ttl: %d\n", env->ping_ttl);
-    printf("interval: %d\n", env->interval);
-
-    for (i = 0; i < env->riemann_tag_count; i++) {
-        printf("riemann tag: %s\n", env->riemann_tags[i]);
-    }
-    for (i = 0; i < env->riemann_attr_count; i++) {
-        printf("riemann attr: %s => %s\n",
-               env->riemann_attrs[i].key,
-               env->riemann_attrs[i].val);
-    }
-    TAILQ_FOREACH(h, &env->hosts, entry) {
-        printf("host: %s\n", h->hostname);
-    }
-}
-
+/*
+ * Add our configured hosts to the liboping object.
+ * We only notify insertion errors. A critical event
+ * will be sent for missed insertion as we compare list members
+ * once the ping run is done.
+ */
 void
 rpp_add_hosts(struct rpp *env) {
     struct host *h;
@@ -273,6 +285,9 @@ rpp_add_hosts(struct rpp *env) {
     }
 }
 
+/*
+ * Remove hosts from the liboping object.
+ */
 void
 rpp_remove_hosts(struct rpp *env) {
     struct host *h;
@@ -282,6 +297,9 @@ rpp_remove_hosts(struct rpp *env) {
     }
 }
 
+/*
+ * Set a host's seen flag to true.
+ */
 void
 rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
     struct host *h;
@@ -295,6 +313,10 @@ rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
     errx(1, "unknown host: %s", hostname);
 }
 
+/*
+ * Return a riemann event with common fields already set to
+ * appropriate values.
+ */
 riemann_event_t *
 rpp_riemann_event(struct rpp *env, const char *hostname)
 {
@@ -327,6 +349,17 @@ rpp_riemann_event(struct rpp *env, const char *hostname)
     return re;
 }
 
+/*
+ * This is the workhorse function:
+ *
+ * - Creates a riemann message.
+ * - Sets all hosts as unseen.
+ * - Iterates over the result, appending riemann events and marking hosts seen.
+ * - Iterates over unseen hosts, appending a riemann event as well.
+ * - Connects to riemann.
+ * - Send messags.
+ * - Disconnects from riemann.
+ */
 void
 rpp_send_messages(struct rpp *env)
 {
@@ -428,16 +461,11 @@ rpp_send_messages(struct rpp *env)
         return;
     }
 
+    /*
+     * This will free our events.
+     */
     riemann_client_send_message_oneshot(env->rclient, rm);
     riemann_client_disconnect(env->rclient);
-}
-
-void
-rpp_riemann_client(struct rpp *env)
-{
-    env->rclient = riemann_client_new();
-    if (env->rclient == NULL)
-        err(1, "cannot create riemann client");
 }
 
 int
@@ -445,43 +473,68 @@ main(int argc, const char *argv[])
 {
     struct rpp  env;
     time_t      tstart;
-    time_t      tfinish;
+    long        duration;
+    long        remaining;
 
     if (argc != 2) {
         usage();
         errx(1, "invalid arguments");
     }
 
-    debug = (getenv("DEBUG") != NULL);
+    debug = (getenv("RPP_DEBUG") != NULL);
 
     bzero(&env, sizeof(env));
     parse_configuration(&env, argv[1]);
-    dump_configuration(&env);
 
     if ((env.po = ping_construct()) == NULL) {
         err(1, "cannot allocate ping object");
     }
 
-    rpp_riemann_client(&env);
+    env.rclient = riemann_client_new();
+    if (env.rclient == NULL)
+        err(1, "cannot create riemann client");
     ping_setopt(env.po, PING_OPT_TIMEOUT, &env.ping_timeout);
     ping_setopt(env.po, PING_OPT_TTL, &env.ping_ttl);
 
+    /*
+     * Our main loop.
+     */
     for (;;) {
         tstart = time(NULL);
+
+        /*
+         * Add all configured hosts
+         */
         rpp_add_hosts(&env);
 
+        /*
+         * Ask liboping to send out pings
+         */
         if (ping_send(env.po) < 0) {
             errx(1, "cannot ping: %s", ping_get_error(env.po));
         }
 
+        /*
+         * Send results to riemann
+         */
         rpp_send_messages(&env);
-        tfinish = time(NULL);
+
+        /*
+         * Remove hosts from object, this gives us a chance of
+         * working through temporary DNS resolution errors.
+         */
+        rpp_remove_hosts(&env);
+
+        duration = (time(NULL)) - tstart;
+        remaining = env.interval - remaining;
 
         if (debug) {
-            printf("took: %ld, sleeping: %ld\n", (tfinish - tstart),
-                   env.interval - (tfinish - tstart));
+            printf("took: %ld, sleeping: %ld\n", duration, env.interval - duration);
         }
-        rpp_remove_hosts(&env);
-        sleep(env.interval - (tfinish - tstart));
+        /*
+         * Remove all configured hosts
+         */
+        if (remaining > 0)
+            sleep(remaining);
     }
 }
