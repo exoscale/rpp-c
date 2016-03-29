@@ -1,0 +1,18 @@
+Source: rpp-c
+Section: net
+Priority: optional
+Homepage: http://github.com/exoscale/rpp-c
+Maintainer: Vincent Bernat <bernat@debian.org>
+Build-Depends: debhelper (>= 9),
+               git,
+               libriemann-client-dev,
+               liboping-dev,
+               libbsd-dev
+Standards-Version: 3.9.7
+
+Package: rpp-c
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: ping hosts and report status to Riemann
+ rpp sends regular ICMP echo messages to a provided list of hosts and
+ reports the results to Riemann.
