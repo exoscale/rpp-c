@@ -1,7 +1,7 @@
 RM=rm -f
 CC=gcc
 PROGRAM=rpp
-LDADD=-lbsd `pkg-config --libs liboping` `pkg-config --libs riemann-client`
+LDADD=-lbsd -loping `pkg-config --libs riemann-client`
 CFLAGS=-Wall -g
 
 all: rpp.c
