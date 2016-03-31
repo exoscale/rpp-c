@@ -47,6 +47,7 @@ struct riemann_attr {
 struct host {
     TAILQ_ENTRY(host)    entry;
     char                 hostname[HOST_NAME_MAX];
+    char		 displayname[HOST_NAME_MAX];
     int                  seen;
 };
 
@@ -83,7 +84,7 @@ void             parse_configuration(struct rpp *, const char *);
 void             dump_configuration(struct rpp *);
 void             rpp_add_hosts(struct rpp *);
 void             rpp_remove_hosts(struct rpp *);
-void             rpp_set_host_seen(struct host_list *, const char *);
+const char	*rpp_set_host_seen(struct host_list *, const char *);
 riemann_event_t *rpp_riemann_event(struct rpp *, const char *);
 void             rpp_send_messages(struct rpp *);
 void             rpp_riemann_client(struct rpp *);
@@ -200,9 +201,21 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
         if ((host = calloc(1, sizeof(*host))) == NULL) {
             err(1, "cannot allocate host");
         }
+        val = strtok(val, " ");
         if (strlcpy(host->hostname, val, sizeof(host->hostname)) >=
             sizeof(host->hostname)) {
             errx(1, "host name truncated");
+        }
+        val = strtok(NULL, " ");
+        if (val != NULL) {
+            /* Optional display name */
+            if (strlcpy(host->displayname, val, sizeof(host->displayname)) >=
+                sizeof(host->displayname)) {
+                errx(1, "display name truncated");
+            }
+            if (strtok(NULL, " ")) {
+                errx(1, "invalid host: %s", val);
+            }
         }
         TAILQ_INSERT_TAIL(&env->hosts, host, entry);
     } else {
@@ -300,14 +313,14 @@ rpp_remove_hosts(struct rpp *env) {
 /*
  * Set a host's seen flag to true.
  */
-void
+const char *
 rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
     struct host *h;
 
     TAILQ_FOREACH(h, hosts, entry) {
         if (strncmp(h->hostname, hostname, strlen(h->hostname)) == 0) {
             h->seen = 1;
-            return;
+            return strlen(h->displayname)?h->displayname:h->hostname;
         }
     }
     errx(1, "unknown host: %s", hostname);
@@ -371,6 +384,7 @@ rpp_send_messages(struct rpp *env)
     double               latency;
     int                  e;
     size_t               len;
+    const char		*displayname;
 
     if ((rm = riemann_message_new()) == NULL)
         err(1, "cannot allocate riemann message");
@@ -388,13 +402,13 @@ rpp_send_messages(struct rpp *env)
         len = sizeof(hostname);
         ping_iterator_get_info(it, PING_INFO_USERNAME, hostname, &len);
 
-        rpp_set_host_seen(&env->hosts, hostname);
+        displayname = rpp_set_host_seen(&env->hosts, hostname);
 
         len = sizeof(latency);
         ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
 
 
-        re = rpp_riemann_event(env, hostname);
+        re = rpp_riemann_event(env, displayname);
 
         riemann_event_set(re,
                           RIEMANN_EVENT_FIELD_STATE,
@@ -409,7 +423,8 @@ rpp_send_messages(struct rpp *env)
 
     TAILQ_FOREACH(h, &env->hosts, entry) {
         if (!h->seen) {
-            re = rpp_riemann_event(env, h->hostname);
+            displayname = strlen(h->displayname)?h->displayname:h->hostname;
+            re = rpp_riemann_event(env, displayname);
             riemann_event_set(re,
                               RIEMANN_EVENT_FIELD_STATE,
                               "critical",
