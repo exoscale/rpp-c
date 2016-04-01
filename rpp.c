@@ -421,9 +421,8 @@ rpp_send_messages(struct rpp *env)
                           (latency >= 0) ? "ok" : "critical",
                           RIEMANN_EVENT_FIELD_METRIC_D,
                           latency,
-                          RIEMANN_EVENT_FIELD_STRING_ATTRIBUTES,
-                          "lost", "false", NULL,
                           RIEMANN_EVENT_FIELD_NONE);
+        riemann_event_string_attribute_add(re, "lost", "false");
         riemann_message_append_events(rm, re, NULL);
     }
 
@@ -436,9 +435,8 @@ rpp_send_messages(struct rpp *env)
                               "critical",
                               RIEMANN_EVENT_FIELD_METRIC_D,
                               0.0,
-                              RIEMANN_EVENT_FIELD_STRING_ATTRIBUTES,
-                              "lost", "true", NULL,
                               RIEMANN_EVENT_FIELD_NONE);
+            riemann_event_string_attribute_add(re, "lost", "true");
             riemann_message_append_events(rm, re, NULL);
         }
     }
