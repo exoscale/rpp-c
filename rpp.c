@@ -167,11 +167,12 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
             errx(1, "invalid attribute: %s", val);
         }
         val[off] = '\0';
-        off++;
         attr = &env->riemann_attrs[env->riemann_attr_count];
         if (strlcpy(attr->key, val, sizeof(attr->key)) >= sizeof(attr->key)) {
             errx(1, "attribute key truncated");
         }
+        off++;
+        off += strspn(val + off, " \t");
         val += off;
         if (strlcpy(attr->val, val, sizeof(attr->val)) >= sizeof(attr->val)) {
             errx(1, "attribute val truncated");
