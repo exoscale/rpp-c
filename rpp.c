@@ -111,7 +111,7 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
     const char          *errstr = NULL;
     struct riemann_attr *attr = NULL;
     struct host         *host = NULL;
-    size_t               off;
+    size_t               off, len;
 
     if (strcasecmp(key, "riemann-proto") == 0) {
         if (strcasecmp(val, "tcp") == 0) {
@@ -166,13 +166,13 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
         if (off == strlen(val)) {
             errx(1, "invalid attribute: %s", val);
         }
-        val[off] = 0;
+        val[off] = '\0';
         off++;
         attr = &env->riemann_attrs[env->riemann_attr_count];
         if (strlcpy(attr->key, val, sizeof(attr->key)) >= sizeof(attr->key)) {
             errx(1, "attribute key truncated");
         }
-        val = val + off;
+        val += off;
         if (strlcpy(attr->val, val, sizeof(attr->val)) >= sizeof(attr->val)) {
             errx(1, "attribute val truncated");
         }
@@ -201,20 +201,26 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
         if ((host = calloc(1, sizeof(*host))) == NULL) {
             err(1, "cannot allocate host");
         }
-        val = strtok(val, " ");
+        len = strlen(val);
+        off = strcspn(val, " \t");
+        val[off] = '\0';
         if (strlcpy(host->hostname, val, sizeof(host->hostname)) >=
             sizeof(host->hostname)) {
             errx(1, "host name truncated");
         }
-        val = strtok(NULL, " ");
-        if (val != NULL) {
+        if (len != off) {
             /* Optional display name */
+            off++;
+            off += strspn(val + off, " \t");
+            val += off; len -= off;
+            off = strcspn(val, " \t");
+            val[off] = '\0';
+            if (len != off) {
+                errx(1, "too many arguments for host: %s", val);
+            }
             if (strlcpy(host->displayname, val, sizeof(host->displayname)) >=
                 sizeof(host->displayname)) {
                 errx(1, "display name truncated");
-            }
-            if (strtok(NULL, " ")) {
-                errx(1, "invalid host: %s", val);
             }
         }
         TAILQ_INSERT_TAIL(&env->hosts, host, entry);
