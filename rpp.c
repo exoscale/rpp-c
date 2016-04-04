@@ -35,6 +35,7 @@
 #define RIEMANN_ATTR_MAX        512
 #define CONFIG_LINE_MAX         2048
 #define DEFAULT_INTERVAL        60
+#define DEFAULT_RIEMANN_TTL     600
 #define ITERATOR_BUFFER_SIZE    2048
 
 int debug = 0;
@@ -250,6 +251,7 @@ parse_configuration(struct rpp *env, const char *path)
     env->ping_timeout = PING_DEF_TIMEOUT;
     env->ping_ttl = PING_DEF_TTL;
     env->interval = DEFAULT_INTERVAL;
+    env->riemann_ttl = DEFAULT_RIEMANN_TTL;
 
     if ((f = fopen(path, "r")) == NULL)
         err(1, "cannot open configuration: %s", path);
