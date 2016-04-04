@@ -352,7 +352,7 @@ rpp_riemann_event(struct rpp *env, const char *hostname)
                                    RIEMANN_EVENT_FIELD_SERVICE,
                                    service,
                                    RIEMANN_EVENT_FIELD_TTL,
-                                   env->riemann_ttl,
+                                   (double)env->riemann_ttl,
                                    RIEMANN_EVENT_FIELD_TIME,
                                    (int64_t)time(NULL),
                                    RIEMANN_EVENT_FIELD_NONE)) == NULL)
