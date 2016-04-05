@@ -55,6 +55,12 @@ The following options are supported:
 - `interval`: Interval at which to send ICMP echo messages.
 - `host`: Add a host to the list of probed hosts.
 
+The first argument for `host` is the host to ping. Additional
+arguments are accepted. The first character determine the type of the
+argument:
+
+ - `:` to change the hostname that would be sent to Riemann
+ - `+` to add a specific Riemann tag
 
 ### Running
 

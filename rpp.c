@@ -29,14 +29,15 @@
 #include <time.h>
 #include <riemann/riemann-client.h>
 
-#define RIEMANN_SERVICE_MAX     64
-#define RIEMANN_PROTO_MAX       4
-#define RIEMANN_TAG_MAX         512
-#define RIEMANN_ATTR_MAX        512
-#define CONFIG_LINE_MAX         2048
-#define DEFAULT_INTERVAL        60
-#define DEFAULT_RIEMANN_TTL     600
-#define ITERATOR_BUFFER_SIZE    2048
+#define RIEMANN_SERVICE_MAX      64
+#define RIEMANN_PROTO_MAX        4
+#define RIEMANN_TAG_MAX          512
+#define RIEMANN_PER_HOST_TAG_MAX 16
+#define RIEMANN_ATTR_MAX         512
+#define CONFIG_LINE_MAX          2048
+#define DEFAULT_INTERVAL         60
+#define DEFAULT_RIEMANN_TTL      600
+#define ITERATOR_BUFFER_SIZE     2048
 
 int debug = 0;
 
@@ -48,7 +49,9 @@ struct riemann_attr {
 struct host {
     TAILQ_ENTRY(host)    entry;
     char                 hostname[HOST_NAME_MAX];
-    char		 displayname[HOST_NAME_MAX];
+    char                 displayname[HOST_NAME_MAX];
+    char                *riemann_tags[RIEMANN_PER_HOST_TAG_MAX];
+    int                  riemann_tag_count;
     int                  seen;
 };
 
@@ -85,8 +88,8 @@ void             parse_configuration(struct rpp *, const char *);
 void             dump_configuration(struct rpp *);
 void             rpp_add_hosts(struct rpp *);
 void             rpp_remove_hosts(struct rpp *);
-const char	*rpp_set_host_seen(struct host_list *, const char *);
-riemann_event_t *rpp_riemann_event(struct rpp *, const char *);
+struct host     *rpp_set_host_seen(struct host_list *, const char *);
+riemann_event_t *rpp_riemann_event(struct rpp *, struct host *);
 void             rpp_send_messages(struct rpp *);
 void             rpp_riemann_client(struct rpp *);
 
@@ -210,19 +213,32 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
             sizeof(host->hostname)) {
             errx(1, "host name truncated");
         }
-        if (len != off) {
-            /* Optional display name */
+        while (len != off) {
+            /* Optional attribute */
             off++;
             off += strspn(val + off, " \t");
             val += off; len -= off;
             off = strcspn(val, " \t");
             val[off] = '\0';
-            if (len != off) {
-                errx(1, "too many arguments for host: %s", val);
+            if (strlen(val) == 0) break;
+            if (strlen(val) == 1) {
+                errx(1, "too short optional attribute: %s", val);
             }
-            if (strlcpy(host->displayname, val, sizeof(host->displayname)) >=
-                sizeof(host->displayname)) {
-                errx(1, "display name truncated");
+            switch (val[0]) {
+            case ':':
+                if (strlcpy(host->displayname, val + 1, sizeof(host->displayname)) >=
+                    sizeof(host->displayname))
+                    errx(1, "display name truncated");
+                break;
+            case '+':
+                if (host->riemann_tag_count >= RIEMANN_TAG_MAX)
+                    errx(1, "too many tags");
+                if ((host->riemann_tags[host->riemann_tag_count++] = strdup(val + 1)) == NULL)
+                    err(1, "cannot allocate tag");
+                break;
+            default:
+                errx(1, "unknown attribute: %s", val);
+                break;
             }
         }
         TAILQ_INSERT_TAIL(&env->hosts, host, entry);
@@ -322,14 +338,14 @@ rpp_remove_hosts(struct rpp *env) {
 /*
  * Set a host's seen flag to true.
  */
-const char *
+struct host *
 rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
     struct host *h;
 
     TAILQ_FOREACH(h, hosts, entry) {
         if (strncmp(h->hostname, hostname, strlen(h->hostname)) == 0) {
             h->seen = 1;
-            return strlen(h->displayname)?h->displayname:h->hostname;
+            return h;
         }
     }
     errx(1, "unknown host: %s", hostname);
@@ -340,17 +356,20 @@ rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
  * appropriate values.
  */
 riemann_event_t *
-rpp_riemann_event(struct rpp *env, const char *hostname)
+rpp_riemann_event(struct rpp *env, struct host *h)
 {
 
     int i;
     riemann_event_t *re;
     char             service[PATH_MAX];
+    char            *displayname;
+
+    displayname = strlen(h->displayname)?h->displayname:h->hostname;
 
     (void)strlcpy(service, env->riemann_service, sizeof(service));
 
     if ((re = riemann_event_create(RIEMANN_EVENT_FIELD_HOST,
-                                   hostname,
+                                   displayname,
                                    RIEMANN_EVENT_FIELD_SERVICE,
                                    service,
                                    RIEMANN_EVENT_FIELD_TTL,
@@ -362,6 +381,9 @@ rpp_riemann_event(struct rpp *env, const char *hostname)
 
     for (i = 0; i < env->riemann_tag_count; i++) {
         riemann_event_tag_add(re, env->riemann_tags[i]);
+    }
+    for (i = 0; i < h->riemann_tag_count; i++) {
+        riemann_event_tag_add(re, h->riemann_tags[i]);
     }
     for (i = 0; i < env->riemann_attr_count; i++) {
         riemann_event_string_attribute_add(re,
@@ -393,7 +415,6 @@ rpp_send_messages(struct rpp *env)
     double               latency;
     int                  e;
     size_t               len;
-    const char		*displayname;
 
     if ((rm = riemann_message_new()) == NULL)
         err(1, "cannot allocate riemann message");
@@ -411,13 +432,13 @@ rpp_send_messages(struct rpp *env)
         len = sizeof(hostname);
         ping_iterator_get_info(it, PING_INFO_USERNAME, hostname, &len);
 
-        displayname = rpp_set_host_seen(&env->hosts, hostname);
+        h = rpp_set_host_seen(&env->hosts, hostname);
 
         len = sizeof(latency);
         ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
 
 
-        re = rpp_riemann_event(env, displayname);
+        re = rpp_riemann_event(env, h);
 
         riemann_event_set(re,
                           RIEMANN_EVENT_FIELD_STATE,
@@ -431,8 +452,7 @@ rpp_send_messages(struct rpp *env)
 
     TAILQ_FOREACH(h, &env->hosts, entry) {
         if (!h->seen) {
-            displayname = strlen(h->displayname)?h->displayname:h->hostname;
-            re = rpp_riemann_event(env, displayname);
+            re = rpp_riemann_event(env, h);
             riemann_event_set(re,
                               RIEMANN_EVENT_FIELD_STATE,
                               "critical",
