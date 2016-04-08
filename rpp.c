@@ -275,6 +275,7 @@ parse_configuration(struct rpp *env, const char *path)
     env->ping_ttl = PING_DEF_TTL;
     env->interval = DEFAULT_INTERVAL;
     env->riemann_ttl = DEFAULT_RIEMANN_TTL;
+    env->retries = DEFAULT_RETRIES;
 
     if ((f = fopen(path, "r")) == NULL)
         err(1, "cannot open configuration: %s", path);
@@ -506,8 +507,8 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
     riemann_event_t     *re;
     double               latency;
     size_t               len;
-    const char          *state = (try == 1) ? "ok" : "warning";
-    const char          *retried = (try == 1) ? "false" : "true";
+    const char          *state = (try == 0) ? "ok" : "warning";
+    const char          *retried = (try == 0) ? "false" : "true";
 
     for (it =  ping_iterator_get(env->po);
          it != NULL;
