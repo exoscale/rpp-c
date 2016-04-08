@@ -369,7 +369,7 @@ riemann_event_t *
 rpp_riemann_event(struct rpp *env, struct host *h)
 {
 
-    int i;
+    int              i;
     riemann_event_t *re;
     char             service[PATH_MAX];
     char            *displayname;
@@ -480,9 +480,12 @@ rpp_add_missing(struct rpp *env, riemann_message_t *rm)
                               RIEMANN_EVENT_FIELD_METRIC_D,
                               0.0,
                               RIEMANN_EVENT_FIELD_NONE);
-            riemann_event_string_attribute_add(re, "lost", "true");
+            riemann_event_string_attribute_add(re, "rpp-lost", "true");
+            riemann_event_string_attribute_add(re, "rpp-retried", "true");
             riemann_message_append_events(rm, re, NULL);
+            ping_host_remove(env->po, h->hostname);
         }
+        h->seen = 0;
     }
 }
 
@@ -519,24 +522,24 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
         len = sizeof(hostname);
         ping_iterator_get_info(it, PING_INFO_USERNAME, hostname, &len);
 
-        h = rpp_set_host_seen(&env->hosts, hostname);
 
         len = sizeof(latency);
         ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
 
-
-        re = rpp_riemann_event(env, h);
-
-        riemann_event_set(re,
-                          RIEMANN_EVENT_FIELD_STATE,
-                          (latency >= 0) ? state : "critical",
-                          RIEMANN_EVENT_FIELD_METRIC_D,
-                          latency,
-                          RIEMANN_EVENT_FIELD_NONE);
-        riemann_event_string_attribute_add(re, "rpp-lost", "false");
-        riemann_event_string_attribute_add(re, "rpp-retried", retried);
-        riemann_message_append_events(rm, re, NULL);
-        ping_host_remove(env->po, h->hostname);
+        if (latency >= 0) {
+            h = rpp_set_host_seen(&env->hosts, hostname);
+            re = rpp_riemann_event(env, h);
+            riemann_event_set(re,
+                              RIEMANN_EVENT_FIELD_STATE,
+                              state,
+                              RIEMANN_EVENT_FIELD_METRIC_D,
+                              latency,
+                              RIEMANN_EVENT_FIELD_NONE);
+            riemann_event_string_attribute_add(re, "rpp-lost", "false");
+            riemann_event_string_attribute_add(re, "rpp-retried", retried);
+            riemann_message_append_events(rm, re, NULL);
+            ping_host_remove(env->po, h->hostname);
+        }
     }
 }
 
@@ -594,8 +597,10 @@ main(int argc, const char *argv[])
             }
 
             rpp_augment_message(&env, rm, try);
-            if (ping_iterator_get(env.po) == NULL)
+            if (ping_iterator_get(env.po) == NULL) {
+                warnx("exiting loop early");
                 break;
+            }
         }
         rpp_add_missing(&env, rm);
 
