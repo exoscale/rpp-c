@@ -53,6 +53,7 @@ The following options are supported:
 - `ping-timeout`: Timeout after which pings will be considered lost.
 - `ping-ttl`: TTL to attach to ICMP echo messages.
 - `interval`: Interval at which to send ICMP echo messages.
+- `retries`: How many times to try pinging failed hosts.
 - `host`: Add a host to the list of probed hosts.
 
 The first argument for `host` is the host to ping. Additional
