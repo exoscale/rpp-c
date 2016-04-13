@@ -37,6 +37,7 @@
 #define CONFIG_LINE_MAX          2048
 #define DEFAULT_INTERVAL         60
 #define DEFAULT_RIEMANN_TTL      600
+#define DEFAULT_RETRIES          1
 #define ITERATOR_BUFFER_SIZE     2048
 
 int debug = 0;
@@ -76,6 +77,7 @@ struct rpp {
     int                          riemann_ttl;
     double                       ping_timeout;
     int                          ping_ttl;
+    int                          retries;
     int                          interval;
     TAILQ_HEAD(host_list, host)  hosts;
     pingobj_t                   *po;
@@ -90,7 +92,7 @@ void             rpp_add_hosts(struct rpp *);
 void             rpp_remove_hosts(struct rpp *);
 struct host     *rpp_set_host_seen(struct host_list *, const char *);
 riemann_event_t *rpp_riemann_event(struct rpp *, struct host *);
-void             rpp_send_messages(struct rpp *);
+void             rpp_send_messages(struct rpp *, riemann_message_t *);
 void             rpp_riemann_client(struct rpp *);
 
 /*
@@ -197,6 +199,11 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
         if (errstr != NULL) {
             errx(1, "invalid ping ttl: %s", val);
         }
+    } else if (strcasecmp(key, "retries") == 0) {
+        env->retries = (int)strtonum(val, 1, 255, &errstr);
+        if (errstr != NULL) {
+            errx(1, "invalid retries value: %s", val);
+        }
     } else if (strcasecmp(key, "interval") == 0) {
         env->interval = (int)strtonum(val, 1, INT_MAX, &errstr);
         if (errstr != NULL) {
@@ -268,6 +275,7 @@ parse_configuration(struct rpp *env, const char *path)
     env->ping_ttl = PING_DEF_TTL;
     env->interval = DEFAULT_INTERVAL;
     env->riemann_ttl = DEFAULT_RIEMANN_TTL;
+    env->retries = DEFAULT_RETRIES;
 
     if ((f = fopen(path, "r")) == NULL)
         err(1, "cannot open configuration: %s", path);
@@ -320,6 +328,7 @@ rpp_add_hosts(struct rpp *env) {
                     h->hostname,
                     ping_get_error(env->po));
         }
+        h->seen = 0;
     }
 }
 
@@ -332,6 +341,7 @@ rpp_remove_hosts(struct rpp *env) {
 
     TAILQ_FOREACH(h, &env->hosts, entry) {
         ping_host_remove(env->po, h->hostname);
+        h->seen = 0;
     }
 }
 
@@ -359,7 +369,7 @@ riemann_event_t *
 rpp_riemann_event(struct rpp *env, struct host *h)
 {
 
-    int i;
+    int              i;
     riemann_event_t *re;
     char             service[PATH_MAX];
     char            *displayname;
@@ -405,64 +415,9 @@ rpp_riemann_event(struct rpp *env, struct host *h)
  * - Disconnects from riemann.
  */
 void
-rpp_send_messages(struct rpp *env)
+rpp_send_messages(struct rpp *env, riemann_message_t *rm)
 {
-    struct host         *h;
-    pingobj_iter_t      *it;
-    char                 hostname[ITERATOR_BUFFER_SIZE];
-    riemann_message_t   *rm;
-    riemann_event_t     *re;
-    double               latency;
     int                  e;
-    size_t               len;
-
-    if ((rm = riemann_message_new()) == NULL)
-        err(1, "cannot allocate riemann message");
-
-    TAILQ_FOREACH(h, &env->hosts, entry) {
-        h->seen = 0;
-    }
-
-    for (it =  ping_iterator_get(env->po);
-         it != NULL;
-         it = ping_iterator_next(it)) {
-
-        bzero(hostname, sizeof(hostname));
-
-        len = sizeof(hostname);
-        ping_iterator_get_info(it, PING_INFO_USERNAME, hostname, &len);
-
-        h = rpp_set_host_seen(&env->hosts, hostname);
-
-        len = sizeof(latency);
-        ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
-
-
-        re = rpp_riemann_event(env, h);
-
-        riemann_event_set(re,
-                          RIEMANN_EVENT_FIELD_STATE,
-                          (latency >= 0) ? "ok" : "critical",
-                          RIEMANN_EVENT_FIELD_METRIC_D,
-                          latency,
-                          RIEMANN_EVENT_FIELD_NONE);
-        riemann_event_string_attribute_add(re, "lost", "false");
-        riemann_message_append_events(rm, re, NULL);
-    }
-
-    TAILQ_FOREACH(h, &env->hosts, entry) {
-        if (!h->seen) {
-            re = rpp_riemann_event(env, h);
-            riemann_event_set(re,
-                              RIEMANN_EVENT_FIELD_STATE,
-                              "critical",
-                              RIEMANN_EVENT_FIELD_METRIC_D,
-                              0.0,
-                              RIEMANN_EVENT_FIELD_NONE);
-            riemann_event_string_attribute_add(re, "lost", "true");
-            riemann_message_append_events(rm, re, NULL);
-        }
-    }
 
     e = 0;
     switch (env->riemann_proto) {
@@ -510,6 +465,84 @@ rpp_send_messages(struct rpp *env)
     riemann_client_disconnect(env->rclient);
 }
 
+void
+rpp_add_missing(struct rpp *env, riemann_message_t *rm)
+{
+    struct host     *h;
+    riemann_event_t *re;
+
+    TAILQ_FOREACH(h, &env->hosts, entry) {
+        if (!h->seen) {
+            re = rpp_riemann_event(env, h);
+            riemann_event_set(re,
+                              RIEMANN_EVENT_FIELD_STATE,
+                              "critical",
+                              RIEMANN_EVENT_FIELD_METRIC_D,
+                              0.0,
+                              RIEMANN_EVENT_FIELD_NONE);
+            riemann_event_string_attribute_add(re, "rpp-lost", "true");
+            riemann_event_string_attribute_add(re, "rpp-retried", "true");
+            riemann_message_append_events(rm, re, NULL);
+            ping_host_remove(env->po, h->hostname);
+        }
+        h->seen = 0;
+    }
+}
+
+
+/*
+ * This is the workhorse function:
+ *
+ * - Creates a riemann message.
+ * - Sets all hosts as unseen.
+ * - Iterates over the result, appending riemann events and marking hosts seen.
+ * - Iterates over unseen hosts, appending a riemann event as well.
+ * - Connects to riemann.
+ * - Send messags.
+ * - Disconnects from riemann.
+ */
+void
+rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
+{
+    struct host         *h;
+    pingobj_iter_t      *it;
+    char                 hostname[ITERATOR_BUFFER_SIZE];
+    riemann_event_t     *re;
+    double               latency;
+    size_t               len;
+    const char          *state = (try == 0) ? "ok" : "warning";
+    const char          *retried = (try == 0) ? "false" : "true";
+
+    for (it =  ping_iterator_get(env->po);
+         it != NULL;
+         it = ping_iterator_next(it)) {
+
+        bzero(hostname, sizeof(hostname));
+
+        len = sizeof(hostname);
+        ping_iterator_get_info(it, PING_INFO_USERNAME, hostname, &len);
+
+
+        len = sizeof(latency);
+        ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
+
+        if (latency >= 0) {
+            h = rpp_set_host_seen(&env->hosts, hostname);
+            re = rpp_riemann_event(env, h);
+            riemann_event_set(re,
+                              RIEMANN_EVENT_FIELD_STATE,
+                              state,
+                              RIEMANN_EVENT_FIELD_METRIC_D,
+                              latency,
+                              RIEMANN_EVENT_FIELD_NONE);
+            riemann_event_string_attribute_add(re, "rpp-lost", "false");
+            riemann_event_string_attribute_add(re, "rpp-retried", retried);
+            riemann_message_append_events(rm, re, NULL);
+            ping_host_remove(env->po, h->hostname);
+        }
+    }
+}
+
 int
 main(int argc, const char *argv[])
 {
@@ -517,6 +550,8 @@ main(int argc, const char *argv[])
     time_t      tstart;
     long        duration;
     long        remaining;
+    int         try;
+    riemann_message_t   *rm;
 
     if (argc != 2) {
         usage();
@@ -552,14 +587,27 @@ main(int argc, const char *argv[])
         /*
          * Ask liboping to send out pings
          */
-        if (ping_send(env.po) < 0) {
-            errx(1, "cannot ping: %s", ping_get_error(env.po));
+        if ((rm = riemann_message_new()) == NULL)
+            err(1, "cannot allocate riemann message");
+
+        for (try = 0; try < env.retries; try++) {
+
+            if (ping_send(env.po) < 0) {
+                errx(1, "cannot ping: %s", ping_get_error(env.po));
+            }
+
+            rpp_augment_message(&env, rm, try);
+            if (ping_iterator_get(env.po) == NULL) {
+                warnx("exiting loop early");
+                break;
+            }
         }
+        rpp_add_missing(&env, rm);
 
         /*
          * Send results to riemann
          */
-        rpp_send_messages(&env);
+        rpp_send_messages(&env, rm);
 
         /*
          * Remove hosts from object, this gives us a chance of
