@@ -202,7 +202,7 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
     } else if (strcasecmp(key, "retries") == 0) {
         env->retries = (int)strtonum(val, 1, 255, &errstr);
         if (errstr != NULL) {
-            errx(1, "invalid retry value: %s", val);
+            errx(1, "invalid retries value: %s", val);
         }
     } else if (strcasecmp(key, "interval") == 0) {
         env->interval = (int)strtonum(val, 1, INT_MAX, &errstr);
