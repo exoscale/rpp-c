@@ -63,6 +63,9 @@ argument:
  - `:` to change the hostname that would be sent to Riemann
  - `+` to add a specific Riemann tag
 
+Note that if several hosts solve to the same IP, only one of them will
+be reported as up.
+
 ### Running
 
 Since ping requires raw sockets, rpp should be run as root.
