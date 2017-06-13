@@ -5,6 +5,7 @@ Homepage: http://github.com/exoscale/rpp-c
 Maintainer: Vincent Bernat <bernat@debian.org>
 Build-Depends: debhelper (>= 9),
                git,
+               dh-systemd,
                libriemann-client-dev,
                liboping-dev,
                libbsd-dev,
