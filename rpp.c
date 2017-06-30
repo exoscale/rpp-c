@@ -598,7 +598,6 @@ main(int argc, const char *argv[])
 
             rpp_augment_message(&env, rm, try);
             if (ping_iterator_get(env.po) == NULL) {
-                warnx("exiting loop early");
                 break;
             }
         }
