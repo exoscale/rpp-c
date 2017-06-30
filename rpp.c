@@ -90,7 +90,6 @@ void             parse_configuration(struct rpp *, const char *);
 void             dump_configuration(struct rpp *);
 void             rpp_add_hosts(struct rpp *);
 void             rpp_remove_hosts(struct rpp *);
-struct host     *rpp_set_host_seen(struct host_list *, const char *);
 riemann_event_t *rpp_riemann_event(struct rpp *, struct host *);
 void             rpp_send_messages(struct rpp *, riemann_message_t *);
 void             rpp_riemann_client(struct rpp *);
@@ -346,22 +345,6 @@ rpp_remove_hosts(struct rpp *env) {
 }
 
 /*
- * Set a host's seen flag to true.
- */
-struct host *
-rpp_set_host_seen(struct host_list *hosts, const char *hostname) {
-    struct host *h;
-
-    TAILQ_FOREACH(h, hosts, entry) {
-        if (strncmp(h->hostname, hostname, strlen(h->hostname)) == 0) {
-            h->seen = 1;
-            return h;
-        }
-    }
-    errx(1, "unknown host: %s", hostname);
-}
-
-/*
  * Return a riemann event with common fields already set to
  * appropriate values.
  */
@@ -527,18 +510,22 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
         ping_iterator_get_info(it, PING_INFO_LATENCY, &latency, &len);
 
         if (latency >= 0) {
-            h = rpp_set_host_seen(&env->hosts, hostname);
-            re = rpp_riemann_event(env, h);
-            riemann_event_set(re,
-                              RIEMANN_EVENT_FIELD_STATE,
-                              state,
-                              RIEMANN_EVENT_FIELD_METRIC_D,
-                              latency,
-                              RIEMANN_EVENT_FIELD_NONE);
-            riemann_event_string_attribute_add(re, "rpp-lost", "false");
-            riemann_event_string_attribute_add(re, "rpp-retried", retried);
-            riemann_message_append_events(rm, re, NULL);
-            ping_host_remove(env->po, h->hostname);
+            TAILQ_FOREACH(h, &env->hosts, entry) {
+                if (strncmp(h->hostname, hostname, strlen(h->hostname)) == 0) {
+                    h->seen = 1;
+                    re = rpp_riemann_event(env, h);
+                    riemann_event_set(re,
+                                      RIEMANN_EVENT_FIELD_STATE,
+                                      state,
+                                      RIEMANN_EVENT_FIELD_METRIC_D,
+                                      latency,
+                                      RIEMANN_EVENT_FIELD_NONE);
+                    riemann_event_string_attribute_add(re, "rpp-lost", "false");
+                    riemann_event_string_attribute_add(re, "rpp-retried", retried);
+                    riemann_message_append_events(rm, re, NULL);
+                    ping_host_remove(env->po, h->hostname);
+                }
+            }
         }
     }
 }
