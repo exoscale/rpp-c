@@ -523,9 +523,15 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
                     riemann_event_string_attribute_add(re, "rpp-lost", "false");
                     riemann_event_string_attribute_add(re, "rpp-retried", retried);
                     riemann_message_append_events(rm, re, NULL);
-                    ping_host_remove(env->po, h->hostname);
                 }
             }
+        }
+    }
+    TAILQ_FOREACH(h, &env->hosts, entry) {
+        if (h->seen) {
+            /* When there are several occurrences, ping_host_remove()
+             * removes all of them. */
+            ping_host_remove(env->po, h->hostname);
         }
     }
 }
