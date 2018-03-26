@@ -456,6 +456,9 @@ rpp_add_missing(struct rpp *env, riemann_message_t *rm)
 
     TAILQ_FOREACH(h, &env->hosts, entry) {
         if (!h->seen) {
+            if (debug) {
+                printf("%s lost all pings\n", h->displayname);
+            }
             re = rpp_riemann_event(env, h);
             riemann_event_set(re,
                               RIEMANN_EVENT_FIELD_STATE,
@@ -523,6 +526,9 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
                     riemann_event_string_attribute_add(re, "rpp-lost", "false");
                     riemann_event_string_attribute_add(re, "rpp-retried", retried);
                     riemann_message_append_events(rm, re, NULL);
+                    if (retried && debug) {
+                        printf("%s answered on try %d\n", h->displayname, try);
+                    }
                 }
             }
         }
