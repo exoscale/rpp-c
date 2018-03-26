@@ -614,10 +614,10 @@ main(int argc, const char *argv[])
         rpp_remove_hosts(&env);
 
         duration = (time(NULL)) - tstart;
-        remaining = env.interval - remaining;
+        remaining = env.interval - duration;
 
         if (debug) {
-            printf("took: %ld, sleeping: %ld\n", duration, env.interval - duration);
+            printf("took: %ld, sleeping: %ld\n", duration, remaining);
         }
         /*
          * Remove all configured hosts
