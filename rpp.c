@@ -526,7 +526,7 @@ rpp_augment_message(struct rpp *env, riemann_message_t *rm, int try)
                     riemann_event_string_attribute_add(re, "rpp-lost", "false");
                     riemann_event_string_attribute_add(re, "rpp-retried", retried);
                     riemann_message_append_events(rm, re, NULL);
-                    if (retried && debug) {
+                    if (try > 0 && debug) {
                         printf("%s answered on try %d\n", h->displayname, try);
                     }
                 }
