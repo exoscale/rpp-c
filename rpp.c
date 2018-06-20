@@ -53,6 +53,8 @@ struct host {
     char                 displayname[HOST_NAME_MAX];
     char                *riemann_tags[RIEMANN_PER_HOST_TAG_MAX];
     int                  riemann_tag_count;
+    struct riemann_attr  riemann_attrs[RIEMANN_ATTR_MAX];
+    int                  riemann_attr_count;
     int                  seen;
 };
 
@@ -242,6 +244,26 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
                 if ((host->riemann_tags[host->riemann_tag_count++] = strdup(val + 1)) == NULL)
                     err(1, "cannot allocate tag");
                 break;
+            case '@':
+                if (host->riemann_attr_count >= RIEMANN_ATTR_MAX)
+                    errx(1, "too many attributes");
+
+                val++;
+                off = strcspn(val, "=");
+                if (off == strlen(val)) {
+                    errx(1, "invalid attribute: %s", val);
+                }
+                val[off] = '\0';
+                attr = &host->riemann_attrs[host->riemann_attr_count];
+                if (strlcpy(attr->key, val, sizeof(attr->key)) >= sizeof(attr->key)) {
+                    errx(1, "attribute key truncated");
+                }
+                val += off + 1;
+                if (strlcpy(attr->val, val, sizeof(attr->val)) >= sizeof(attr->val)) {
+                    errx(1, "attribute val truncated");
+                }
+                host->riemann_attr_count++;
+                break;
             default:
                 errx(1, "unknown attribute: %s", val);
                 break;
@@ -382,6 +404,11 @@ rpp_riemann_event(struct rpp *env, struct host *h)
         riemann_event_string_attribute_add(re,
                                            env->riemann_attrs[i].key,
                                            env->riemann_attrs[i].val);
+    }
+    for (i = 0; i < h->riemann_attr_count; i++) {
+        riemann_event_string_attribute_add(re,
+                                           h->riemann_attrs[i].key,
+                                           h->riemann_attrs[i].val);
     }
     return re;
 }
