@@ -62,6 +62,7 @@ argument:
 
  - `:` to change the hostname that would be sent to Riemann
  - `+` to add a specific Riemann tag
+ - `@` to add a specific Riemann attribute (eg `@environment=prod`)
 
 Note that if several hosts solve to the same IP, only one of them will
 be reported as up.
