@@ -118,7 +118,7 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
     const char          *errstr = NULL;
     struct riemann_attr *attr = NULL;
     struct host         *host = NULL;
-    size_t               off, len;
+    size_t               off, off2, len;
 
     if (strcasecmp(key, "riemann-proto") == 0) {
         if (strcasecmp(val, "tcp") == 0) {
@@ -248,18 +248,16 @@ parse_configuration_line(struct rpp *env, const char *key, char *val)
                 if (host->riemann_attr_count >= RIEMANN_ATTR_MAX)
                     errx(1, "too many attributes");
 
-                val++;
-                off = strcspn(val, "=");
-                if (off == strlen(val)) {
-                    errx(1, "invalid attribute: %s", val);
+                off2 = strcspn(val + 1, "=");
+                if (off2 == strlen(val + 1)) {
+                    errx(1, "invalid attribute: %s", val + 1);
                 }
-                val[off] = '\0';
+                val[off2 + 1] = '\0';
                 attr = &host->riemann_attrs[host->riemann_attr_count];
-                if (strlcpy(attr->key, val, sizeof(attr->key)) >= sizeof(attr->key)) {
+                if (strlcpy(attr->key, val + 1, sizeof(attr->key)) >= sizeof(attr->key)) {
                     errx(1, "attribute key truncated");
                 }
-                val += off + 1;
-                if (strlcpy(attr->val, val, sizeof(attr->val)) >= sizeof(attr->val)) {
+                if (strlcpy(attr->val, val + off2 + 2, sizeof(attr->val)) >= sizeof(attr->val)) {
                     errx(1, "attribute val truncated");
                 }
                 host->riemann_attr_count++;
